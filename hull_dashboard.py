@@ -112,21 +112,51 @@ all_projects = sorted(df['프로젝트'].unique())
 all_shiptype = sorted(df['선종'].dropna().unique())
 all_stages = sorted(df['stage'].unique())
 
-# 필터 초기화 함수
-def reset_filters():
-    st.session_state.projects_filter = all_projects
-    st.session_state.shiptype_filter = all_shiptype
-    st.session_state.stages_filter = all_stages
+# Hull_info 로드 (프로젝트 정보 표시)
+try:
+    base_path = Path(__file__).parent
+    info_df_lookup = pd.read_csv(base_path / "Hull_info.csv", encoding='utf-8-sig')
+except:
+    info_df_lookup = None
+
+# 헬퍼 함수: 프로젝트 정보 표시
+def show_project_info(project):
+    if info_df_lookup is None:
+        return
+    row = info_df_lookup[info_df_lookup['프로젝트'] == project]
+    if not row.empty:
+        shiptype = row.iloc[0].get('선종', '')
+        shiptype_info = row.iloc[0].get('선형', '')
+        shipowner = row.iloc[0].get('선주', '')
+        series = row.iloc[0].get('시리즈', '')
+        # NaN 처리
+        info_list = [str(x) if pd.notna(x) else '' for x in [shiptype, shiptype_info, shipowner, series]]
+        info_text = ' / '.join([x for x in info_list if x])
+        if info_text:
+            st.sidebar.caption(f"  └─ {info_text}")
 
 # Session state 초기화
 if 'projects_filter' not in st.session_state:
     st.session_state.projects_filter = all_projects
 if 'shiptype_filter' not in st.session_state:
     st.session_state.shiptype_filter = all_shiptype
+if 'moblock_filter' not in st.session_state:
+    st.session_state.moblock_filter = []
+if 'block_filter' not in st.session_state:
+    st.session_state.block_filter = []
 if 'stages_filter' not in st.session_state:
     st.session_state.stages_filter = all_stages
 
-# 프로젝트 필터
+# 필터 초기화 함수
+def reset_filters():
+    st.session_state.projects_filter = all_projects
+    st.session_state.shiptype_filter = all_shiptype
+    st.session_state.moblock_filter = []
+    st.session_state.block_filter = []
+    st.session_state.stages_filter = all_stages
+
+# ─ 프로젝트 필터 (선종과 양방향 연동)
+st.sidebar.markdown("### 📍 프로젝트")
 selected_projects = st.sidebar.multiselect(
     "프로젝트 선택",
     options=all_projects,
@@ -134,20 +164,54 @@ selected_projects = st.sidebar.multiselect(
     key='projects_filter'
 )
 
-# 선종 필터
+# 각 프로젝트의 정보 표시
+for proj in selected_projects:
+    show_project_info(proj)
+
+# ─ 모블록번호 필터 (프로젝트 연동)
+st.sidebar.markdown("### 🔲 모블록번호")
+available_moblocks = sorted(df[df['프로젝트'].isin(selected_projects)]['모블록번호'].dropna().unique()) if selected_projects else []
+selected_moblocks = st.sidebar.multiselect(
+    "모블록번호 선택",
+    options=available_moblocks,
+    default=[m for m in st.session_state.moblock_filter if m in available_moblocks],
+    key='moblock_filter'
+)
+
+# ─ 블록번호 필터 (모블록 연동)
+st.sidebar.markdown("### 🔳 블록번호")
+filter_condition_block = df['프로젝트'].isin(selected_projects)
+if selected_moblocks:
+    filter_condition_block = filter_condition_block & df['모블록번호'].isin(selected_moblocks)
+available_blocks = sorted(df[filter_condition_block]['블록번호'].dropna().unique())
+selected_blocks = st.sidebar.multiselect(
+    "블록번호 선택",
+    options=available_blocks,
+    default=[b for b in st.session_state.block_filter if b in available_blocks],
+    key='block_filter'
+)
+
+# ─ Stage 필터 (블록 연동)
+st.sidebar.markdown("### 📊 Stage")
+filter_condition_stage = df['프로젝트'].isin(selected_projects)
+if selected_blocks:
+    filter_condition_stage = filter_condition_stage & df['블록번호'].isin(selected_blocks)
+available_stages = sorted(df[filter_condition_stage]['stage'].unique())
+selected_stages = st.sidebar.multiselect(
+    "Stage 선택",
+    options=available_stages,
+    default=[s for s in st.session_state.stages_filter if s in available_stages],
+    key='stages_filter'
+)
+
+# ─ 선종 필터 (프로젝트와 양방향 연동)
+st.sidebar.markdown("### 🚢 선종 (프로젝트 연동)")
+available_shiptypes = sorted(df[df['프로젝트'].isin(selected_projects)]['선종'].dropna().unique()) if selected_projects else all_shiptype
 selected_shiptype = st.sidebar.multiselect(
     "선종 선택",
     options=all_shiptype,
-    default=st.session_state.shiptype_filter,
+    default=[s for s in st.session_state.shiptype_filter if s in available_shiptypes],
     key='shiptype_filter'
-)
-
-# Stage 필터
-selected_stages = st.sidebar.multiselect(
-    "Stage 선택",
-    options=all_stages,
-    default=st.session_state.stages_filter,
-    key='stages_filter'
 )
 
 # 필터 초기화 버튼
@@ -162,6 +226,12 @@ filtered_df = df[
     (df['선종'].isin(selected_shiptype)) &
     (df['stage'].isin(selected_stages))
 ].copy()
+
+# 모블록/블록도 필터에 포함
+if selected_moblocks:
+    filtered_df = filtered_df[filtered_df['모블록번호'].isin(selected_moblocks)]
+if selected_blocks:
+    filtered_df = filtered_df[filtered_df['블록번호'].isin(selected_blocks)]
 
 # 필터 결과 요약
 st.sidebar.markdown("---")
