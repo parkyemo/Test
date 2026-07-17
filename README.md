@@ -272,3 +272,11 @@ streamlit run hull_dashboard.py
 **작성일**: 2024년 / 업데이트: 2026년 7월  
 **상태**: ✅ 완성 (실제 DB 연결 대기)  
 **담당자**: 아트박
+
+## 🤝 기여 방법
+
+이 프로젝트에 기여하고 싶으신가요?
+1. 저장소를 Fork하세요
+2. 브랜치를 만드세요 (`git checkout -b feature/improvement`)
+3. 변경사항을 커밋하세요 (`git commit -m 'Add improvement'`)
+4. Push하고 Pull Request를 열어주세요
