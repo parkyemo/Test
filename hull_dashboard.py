@@ -103,8 +103,30 @@ if erec_df is None:
 df = prepare_dashboard_data(erec_df, info_df, r99_df)
 
 # ============================================================================
-# 4. 사이드바 필터
+# 4. 사이드바 필터 (새로운 레이아웃)
 # ============================================================================
+
+# 사이드바 글꼴 크기 줄이기 (CSS)
+st.markdown("""
+<style>
+    [data-testid="stSidebar"] [role="menuitem"] {
+        font-size: 9pt !important;
+    }
+    [data-testid="stSidebar"] label {
+        font-size: 9pt !important;
+    }
+    [data-testid="stSidebar"] .stMarkdown {
+        font-size: 9pt !important;
+    }
+    .project-info {
+        font-size: 8pt;
+        color: #808080;
+        margin-top: -8px;
+        margin-bottom: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.sidebar.header("🔍 필터")
 
 # 모든 필터 옵션 정의
@@ -119,54 +141,75 @@ try:
 except:
     info_df_lookup = None
 
-# 헬퍼 함수: 프로젝트 정보 표시
-def show_project_info(project):
+# 헬퍼 함수: 프로젝트 정보 표시 (새 형식)
+def get_project_info_text(project):
     if info_df_lookup is None:
-        return
+        return ""
     row = info_df_lookup[info_df_lookup['프로젝트'] == project]
     if not row.empty:
-        shiptype = row.iloc[0].get('선종', '')
-        shiptype_info = row.iloc[0].get('선형', '')
-        shipowner = row.iloc[0].get('선주', '')
-        series = row.iloc[0].get('시리즈', '')
-        # NaN 처리
-        info_list = [str(x) if pd.notna(x) else '' for x in [shiptype, shiptype_info, shipowner, series]]
-        info_text = ' / '.join([x for x in info_list if x])
-        if info_text:
-            st.sidebar.caption(f"  └─ {info_text}")
+        shiptype = row.iloc[0]['선종'] if pd.notna(row.iloc[0]['선종']) else ''
+        shiptype_info = row.iloc[0]['선형'] if pd.notna(row.iloc[0]['선형']) else ''
+        shipowner = row.iloc[0]['선주'] if pd.notna(row.iloc[0]['선주']) else ''
+        series = row.iloc[0]['시리즈'] if pd.notna(row.iloc[0]['시리즈']) else ''
+        info_list = [str(x) for x in [shiptype, shiptype_info, shipowner, series] if x]
+        return '[' + '/'.join(info_list) + ']' if info_list else ''
+    return ""
 
-# Session state 초기화
+# Session state 초기화 (empty로 시작)
 if 'projects_filter' not in st.session_state:
-    st.session_state.projects_filter = all_projects
+    st.session_state.projects_filter = []
 if 'shiptype_filter' not in st.session_state:
-    st.session_state.shiptype_filter = all_shiptype
+    st.session_state.shiptype_filter = []
 if 'moblock_filter' not in st.session_state:
     st.session_state.moblock_filter = []
 if 'block_filter' not in st.session_state:
     st.session_state.block_filter = []
 if 'stages_filter' not in st.session_state:
-    st.session_state.stages_filter = all_stages
+    st.session_state.stages_filter = []
 
 # 필터 초기화 함수
 def reset_filters():
-    st.session_state.projects_filter = all_projects
-    st.session_state.shiptype_filter = all_shiptype
+    st.session_state.projects_filter = []
+    st.session_state.shiptype_filter = []
     st.session_state.moblock_filter = []
     st.session_state.block_filter = []
-    st.session_state.stages_filter = all_stages
+    st.session_state.stages_filter = []
 
-# ─ 프로젝트 필터 (선종과 양방향 연동)
-st.sidebar.markdown("### 📍 프로젝트")
-selected_projects = st.sidebar.multiselect(
-    "프로젝트 선택",
-    options=all_projects,
-    default=st.session_state.projects_filter,
-    key='projects_filter'
-)
+# ─ 프로젝트와 선종을 2열로 구성
+st.sidebar.markdown("### 📍 프로젝트 / 🚢 선종")
+col1, col2 = st.sidebar.columns(2)
 
-# 각 프로젝트의 정보 표시
-for proj in selected_projects:
-    show_project_info(proj)
+with col1:
+    selected_projects = st.multiselect(
+        "프로젝트",
+        options=all_projects,
+        default=st.session_state.projects_filter,
+        key='projects_filter',
+        help="프로젝트 선택"
+    )
+
+with col2:
+    # 선종 필터 (프로젝트와 양방향 연동)
+    if selected_projects:
+        available_shiptypes = sorted(df[df['프로젝트'].isin(selected_projects)]['선종'].dropna().unique())
+    else:
+        available_shiptypes = all_shiptype
+
+    selected_shiptype = st.multiselect(
+        "선종",
+        options=all_shiptype,
+        default=[s for s in st.session_state.shiptype_filter if s in available_shiptypes],
+        key='shiptype_filter',
+        help="선종 선택"
+    )
+
+# 프로젝트 정보 표시
+if selected_projects:
+    st.sidebar.markdown("---")
+    for proj in selected_projects:
+        info_text = get_project_info_text(proj)
+        if info_text:
+            st.sidebar.markdown(f"<div class='project-info'>{proj} {info_text}</div>", unsafe_allow_html=True)
 
 # ─ 모블록번호 필터 (프로젝트 연동)
 st.sidebar.markdown("### 🔲 모블록번호")
@@ -202,16 +245,6 @@ selected_stages = st.sidebar.multiselect(
     options=available_stages,
     default=[s for s in st.session_state.stages_filter if s in available_stages],
     key='stages_filter'
-)
-
-# ─ 선종 필터 (프로젝트와 양방향 연동)
-st.sidebar.markdown("### 🚢 선종 (프로젝트 연동)")
-available_shiptypes = sorted(df[df['프로젝트'].isin(selected_projects)]['선종'].dropna().unique()) if selected_projects else all_shiptype
-selected_shiptype = st.sidebar.multiselect(
-    "선종 선택",
-    options=all_shiptype,
-    default=[s for s in st.session_state.shiptype_filter if s in available_shiptypes],
-    key='shiptype_filter'
 )
 
 # 필터 초기화 버튼
@@ -274,7 +307,18 @@ with col5:
 # ============================================================================
 # 6. 탭별 분석
 # ============================================================================
-tab1, tab2, tab3, tab4 = st.tabs(["📈 프로젝트별", "🚢 선종별", "📍 Stage별", "📋 상세 데이터"])
+
+# 필터 모드 선택 (기본 vs 비교)
+tab_mode = st.radio(
+    "분석 모드 선택",
+    options=["📊 기본 필터", "🔄 프로젝트 비교"],
+    horizontal=True
+)
+
+if tab_mode == "📊 기본 필터":
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 프로젝트별", "🚢 선종별", "📍 Stage별", "📋 상세 데이터"])
+else:
+    st.markdown("## 🔄 프로젝트 비교 분석")
 
 # ─────────────────────────────────────────────────────────────────────────
 # TAB 1: 프로젝트별 분석
@@ -534,6 +578,92 @@ with st.expander("ℹ️ 데이터 정보 및 계산 방식"):
     - **30, 40**: 자블록(Sub-block) 단계
     - **50, 60, 70**: 모블록(Module Block) 단계
     """)
+
+# ============================================================================
+# 8. 프로젝트 비교 섹션 (MODE B)
+# ============================================================================
+if tab_mode == "🔄 프로젝트 비교":
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### 프로젝트 A")
+        project_a = st.selectbox(
+            "프로젝트 선택",
+            options=all_projects,
+            key='compare_project_a'
+        )
+        if project_a:
+            info_a = get_project_info_text(project_a)
+            st.markdown(f"<div class='project-info'>{project_a} {info_a}</div>", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("### 프로젝트 B")
+        project_b = st.selectbox(
+            "프로젝트 선택",
+            options=all_projects,
+            key='compare_project_b'
+        )
+        if project_b:
+            info_b = get_project_info_text(project_b)
+            st.markdown(f"<div class='project-info'>{project_b} {info_b}</div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # 공통 블록/Stage 찾기
+    if project_a and project_b and project_a != project_b:
+        df_a = df[df['프로젝트'] == project_a]
+        df_b = df[df['프로젝트'] == project_b]
+
+        common_blocks = set(df_a['블록번호'].unique()) & set(df_b['블록번호'].unique())
+        common_stages = set(df_a['stage'].unique()) & set(df_b['stage'].unique())
+
+        if common_blocks and common_stages:
+            st.success(f"✅ 공통 블록: {sorted(common_blocks)}")
+            st.success(f"✅ 공통 Stage: {sorted(common_stages)}")
+
+            # 공통 블록과 Stage 모두 가진 데이터만 필터링
+            comparison_data = df[
+                ((df['프로젝트'] == project_a) | (df['프로젝트'] == project_b)) &
+                (df['블록번호'].isin(common_blocks)) &
+                (df['stage'].isin(common_stages))
+            ].copy()
+
+            # 블록별, Stage별로 비교 데이터 표시
+            for block in sorted(common_blocks):
+                block_data = comparison_data[comparison_data['블록번호'] == block]
+                st.markdown(f"### 📍 블록 {block}")
+
+                for stage in sorted(block_data['stage'].unique()):
+                    stage_data = block_data[block_data['stage'] == stage]
+                    st.markdown(f"**Stage {stage}**")
+
+                    # 프로젝트별 데이터 비교
+                    comparison_table = []
+                    for _, row in stage_data.iterrows():
+                        comparison_table.append({
+                            '프로젝트': row['프로젝트'],
+                            '계량': f"{row['total_계량']:,.0f}",
+                            '기준': f"{row['total_기준']:,.0f}",
+                            '실행공수': f"{row['total_실행']:,.0f}",
+                            '심출': f"{row['심출_계량']:.0f}/{row['심출_기준']:.0f}/{row['심출_실행']:.0f}",
+                            '취부': f"{row['취부_계량']:.0f}/{row['취부_기준']:.0f}/{row['취부_실행']:.0f}",
+                            '용접': f"{row['용접_계량']:.0f}/{row['용접_기준']:.0f}/{row['용접_실행']:.0f}",
+                            '사상': f"{row['사상_계량']:.0f}/{row['사상_기준']:.0f}/{row['사상_실행']:.0f}",
+                        })
+
+                    if comparison_table:
+                        comparison_df = pd.DataFrame(comparison_table)
+                        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+
+                    st.markdown("---")
+        else:
+            st.warning("⚠️ 공통 블록/Stage가 없습니다.")
+    elif project_a == project_b:
+        st.warning("⚠️ 다른 프로젝트를 선택해주세요.")
+    else:
+        st.info("ℹ️ 프로젝트 A, B를 모두 선택해주세요.")
 
 st.markdown("---")
 st.markdown("**생성일**: 2024년 | **데이터**: 더미데이터 (seed=42)")
