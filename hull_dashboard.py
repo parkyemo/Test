@@ -106,23 +106,25 @@ df = prepare_dashboard_data(erec_df, info_df, r99_df)
 # 4. 사이드바 필터 (새로운 레이아웃)
 # ============================================================================
 
-# 사이드바 글꼴 크기 줄이기 (CSS)
+# 사이드바 글꼴 크기 및 줄간격 줄이기 (CSS)
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] [role="menuitem"] {
-        font-size: 9pt !important;
+    [data-testid="stSidebar"] * {
+        font-size: 7pt !important;
+        line-height: 1.1 !important;
+        padding: 1px 0px !important;
+        margin: 0px 0px !important;
     }
-    [data-testid="stSidebar"] label {
-        font-size: 9pt !important;
-    }
-    [data-testid="stSidebar"] .stMarkdown {
-        font-size: 9pt !important;
+    [data-testid="stSidebar"] h3 {
+        margin-top: 3px !important;
+        margin-bottom: 2px !important;
+        font-size: 7pt !important;
     }
     .project-info {
-        font-size: 8pt;
+        font-size: 7pt !important;
         color: #808080;
-        margin-top: -8px;
-        margin-bottom: 8px;
+        line-height: 1.1 !important;
+        margin: 1px 0px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -175,7 +177,7 @@ def reset_filters():
     st.session_state.block_filter = []
     st.session_state.stages_filter = []
 
-# ─ 프로젝트와 선종을 2열로 구성
+# ─ 프로젝트와 선종을 2열로 구성 (양방향 연동)
 st.sidebar.markdown("### 📍 프로젝트 / 🚢 선종")
 col1, col2 = st.sidebar.columns(2)
 
@@ -184,28 +186,30 @@ with col1:
         "프로젝트",
         options=all_projects,
         default=st.session_state.projects_filter,
-        key='projects_filter',
-        help="프로젝트 선택"
+        key='projects_filter'
     )
 
 with col2:
-    # 선종 필터 (프로젝트와 양방향 연동)
-    if selected_projects:
-        available_shiptypes = sorted(df[df['프로젝트'].isin(selected_projects)]['선종'].dropna().unique())
-    else:
-        available_shiptypes = all_shiptype
-
     selected_shiptype = st.multiselect(
         "선종",
         options=all_shiptype,
-        default=[s for s in st.session_state.shiptype_filter if s in available_shiptypes],
-        key='shiptype_filter',
-        help="선종 선택"
+        default=st.session_state.shiptype_filter,
+        key='shiptype_filter'
     )
+
+# 양방향 필터 연동
+if selected_projects:
+    # 선택된 프로젝트에 해당하는 선종만 허용
+    valid_shiptypes_for_projects = sorted(df[df['프로젝트'].isin(selected_projects)]['선종'].dropna().unique())
+    selected_shiptype = [s for s in selected_shiptype if s in valid_shiptypes_for_projects]
+
+if selected_shiptype:
+    # 선택된 선종에 해당하는 프로젝트만 허용
+    valid_projects_for_shiptypes = sorted(df[df['선종'].isin(selected_shiptype)]['프로젝트'].unique())
+    selected_projects = [p for p in selected_projects if p in valid_projects_for_shiptypes]
 
 # 프로젝트 정보 표시
 if selected_projects:
-    st.sidebar.markdown("---")
     for proj in selected_projects:
         info_text = get_project_info_text(proj)
         if info_text:
