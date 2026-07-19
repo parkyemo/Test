@@ -1,0 +1,12 @@
+# 데이터 파일 (용량 문제로 저장소에 포함하지 않음)
+*.csv
+
+# Claude Code 로컬 설정
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+
+# Streamlit 캐시
+.streamlit/

@@ -10,19 +10,20 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
+from datetime import datetime
 
 # ============================================================================
 # 1. 페이지 설정
 # ============================================================================
 st.set_page_config(
-    page_title="Hull 실적 대시보드",
+    page_title="조선계량 조회 및 분석",
     page_icon="⛵",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("⛵ Hull 실적 대시보드")
-st.markdown("프로젝트 선종 STAGE 단위 공수 분석")
+st.header("■ 조선계량 조회 및 분석")
+st.markdown("<div style='font-size:12pt; color:#666;'>프로젝트/선종/STAGE별 공수, 원단위 정보 조회 및 분석</div>", unsafe_allow_html=True)
 
 # ============================================================================
 # 2. 데이터 로드 (캐시)
@@ -120,9 +121,22 @@ st.markdown("""
     }
 
     [data-testid="stSidebar"] h3 {
-        margin-top: 3px !important;
-        margin-bottom: 2px !important;
+        margin-top: 0px !important;
+        margin-bottom: 0px !important;
         font-size: 9pt !important;
+    }
+
+    /* 사이드바 내 블록(제목-위젯 등) 간 세로 간격 최소화 */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        gap: 0.15rem !important;
+    }
+
+    [data-testid="stSidebar"] .element-container {
+        margin-bottom: 0px !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+        margin-bottom: 0px !important;
     }
 
     .project-info {
@@ -212,10 +226,53 @@ st.markdown("""
         padding: 2px 8px !important;
         min-height: 20px !important;
     }
+
+    /* ─ 기본 필터 모드 탭(프로젝트별/선종별/STAGE별/상세데이터) 색상 및
+       탭 클릭 시 아래 콘텐츠 테두리 색상 연동 (탭 순서와 패널 순서가 1:1로 대응) */
+    [data-testid="stTabs"] [data-testid="stTab"]:nth-child(1) {
+        background-color: rgb(0, 176, 240) !important;
+        color: #ffffff !important;
+    }
+    [data-testid="stTabs"] [data-testid="stTab"]:nth-child(2) {
+        background-color: rgb(146, 208, 80) !important;
+        color: #ffffff !important;
+    }
+    [data-testid="stTabs"] [data-testid="stTab"]:nth-child(3) {
+        background-color: rgb(255, 192, 0) !important;
+        color: #000000 !important;
+    }
+    [data-testid="stTabs"] [data-testid="stTab"]:nth-child(4) {
+        background-color: rgb(217, 217, 217) !important;
+        color: #000000 !important;
+    }
+    [data-testid="stTabs"] [data-testid="stTab"] p {
+        color: inherit !important;
+    }
+    /* 탭 글자 양옆으로 한글자 정도의 여백 추가 */
+    [data-testid="stTabs"] [data-testid="stTab"] {
+        padding-left: 1em !important;
+        padding-right: 1em !important;
+    }
+
+    /* stTabPanel의 형제로 tablist(DIV)가 앞에 있어 nth-of-type 카운트가 1칸 밀림 */
+    [data-testid="stTabPanel"]:nth-of-type(2) {
+        border: 3px solid rgb(0, 176, 240) !important;
+        padding: 12px;
+    }
+    [data-testid="stTabPanel"]:nth-of-type(3) {
+        border: 3px solid rgb(146, 208, 80) !important;
+        padding: 12px;
+    }
+    [data-testid="stTabPanel"]:nth-of-type(4) {
+        border: 3px solid rgb(255, 192, 0) !important;
+        padding: 12px;
+    }
+    [data-testid="stTabPanel"]:nth-of-type(5) {
+        border: 3px solid rgb(217, 217, 217) !important;
+        padding: 12px;
+    }
 </style>
 """, unsafe_allow_html=True)
-
-st.sidebar.header("🔍 필터")
 
 # 모든 필터 옵션 정의
 all_projects = sorted(df['프로젝트'].unique())
@@ -243,82 +300,75 @@ def get_project_info_text(project):
         return '[' + '/'.join(info_list) + ']' if info_list else ''
     return ""
 
-# Session state 초기화 (empty로 시작)
-if 'projects_filter' not in st.session_state:
-    st.session_state.projects_filter = []
-if 'shiptype_filter' not in st.session_state:
-    st.session_state.shiptype_filter = []
-if 'moblock_filter' not in st.session_state:
-    st.session_state.moblock_filter = []
-if 'block_filter' not in st.session_state:
-    st.session_state.block_filter = []
-if 'stages_filter' not in st.session_state:
-    st.session_state.stages_filter = []
+# Widget 캐시 무효화용 카운터
+if '_reset_counter' not in st.session_state:
+    st.session_state._reset_counter = 0
 
-# 필터 초기화 콜백 함수
+# 필터 초기화 콜백 함수 (카운터 증가 → 모든 위젯 key가 바뀌며 완전히 새로 렌더링됨)
 def reset_filters():
-    st.session_state.projects_filter = []
-    st.session_state.shiptype_filter = []
-    st.session_state.moblock_filter = []
-    st.session_state.block_filter = []
-    st.session_state.stages_filter = []
+    st.session_state._reset_counter += 1
 
-# ─ 프로젝트와 선종을 2열로 구성 (양방향 연동)
-st.sidebar.markdown("### 📍 프로젝트 / 🚢 선종")
+_rc = st.session_state._reset_counter
+KEY_PROJECT = f'projects_select_{_rc}'
+KEY_SHIPTYPE = f'shiptype_select_{_rc}'
+KEY_MOBLOCK = f'moblock_select_{_rc}'
+KEY_BLOCK = f'block_select_{_rc}'
+KEY_STAGE = f'stage_select_{_rc}'
 
-col1, col2 = st.sidebar.columns(2)
+# ─ 5개 필터(프로젝트/선종/모블록번호/블록번호/Stage) 완전 상호연동
+# Streamlit은 위젯 상호작용 시 session_state[key]를 스크립트 재실행 전에 이미 갱신하므로,
+# 아래에서 읽는 값은 "이번 rerun에서 사용자가 방금 변경한 위젯"까지 포함한 최신 상태다.
+# → 어떤 필터를 먼저 선택하든 나머지 4개 필터가 그 조건을 즉시 반영한다.
+cur_projects = st.session_state.get(KEY_PROJECT, [])
+cur_shiptypes = st.session_state.get(KEY_SHIPTYPE, [])
+cur_moblocks = st.session_state.get(KEY_MOBLOCK, [])
+cur_blocks = st.session_state.get(KEY_BLOCK, [])
+cur_stages = st.session_state.get(KEY_STAGE, [])
 
-# Col1: 프로젝트 필터 (선종으로 필터링)
-with col1:
-    # 현재 session state 값
-    current_projects = st.session_state.projects_filter or []
-    current_shiptypes = st.session_state.shiptype_filter or []
+def _mask_excluding(exclude):
+    """exclude로 지정한 필터를 제외한 나머지 필터 조건으로 df를 필터링하는 mask 반환"""
+    mask = pd.Series(True, index=df.index)
+    if exclude != 'project' and cur_projects:
+        mask &= df['프로젝트'].isin(cur_projects)
+    if exclude != 'shiptype' and cur_shiptypes:
+        mask &= df['선종'].isin(cur_shiptypes)
+    if exclude != 'moblock' and cur_moblocks:
+        mask &= df['모블록번호'].isin(cur_moblocks)
+    if exclude != 'block' and cur_blocks:
+        mask &= df['블록번호'].isin(cur_blocks)
+    if exclude != 'stage' and cur_stages:
+        mask &= df['stage'].isin(cur_stages)
+    return mask
 
-    # 선종이 선택된 경우만 필터링, 아니면 모든 프로젝트
-    if current_shiptypes:
-        available_projects = set(df[df['선종'].isin(current_shiptypes)]['프로젝트'].unique())
-    else:
-        available_projects = set(all_projects)
+# 각 필터의 선택 가능 옵션 = (자신을 제외한 나머지 4개 필터로 걸러진 데이터의 고유값) ∪ (현재 선택값)
+available_projects = sorted(set(df[_mask_excluding('project')]['프로젝트'].unique()) | set(cur_projects))
+available_shiptypes = sorted(set(df[_mask_excluding('shiptype')]['선종'].dropna().unique()) | set(cur_shiptypes))
+available_moblocks = sorted(set(df[_mask_excluding('moblock')]['모블록번호'].dropna().unique()) | set(cur_moblocks))
+available_blocks = sorted(set(df[_mask_excluding('block')]['블록번호'].dropna().unique()) | set(cur_blocks))
+available_stages = sorted(set(df[_mask_excluding('stage')]['stage'].unique()) | set(cur_stages))
 
-    # 현재 선택된 프로젝트는 항상 옵션에 포함 (선택이 해제되지 않도록)
-    project_options = sorted(available_projects | set(current_projects))
+# ─ 프로젝트 / 선종 (2열)
+st.sidebar.markdown("### ■ 프로젝트 / 선종")
+col_left, col_right = st.sidebar.columns(2)
 
-    # multiselect without key - 반환값을 직접 session state에 저장
+with col_left:
     selected_projects = st.multiselect(
         "프로젝트",
-        options=project_options,
-        default=current_projects
+        options=available_projects,
+        default=cur_projects,
+        key=KEY_PROJECT
     )
-    # 명시적으로 session state 업데이트
-    st.session_state.projects_filter = selected_projects
 
-# Col2: 선종 필터 (프로젝트로 필터링)
-with col2:
-    # 최신 session state 값 읽기
-    current_projects = st.session_state.projects_filter or []
-    current_shiptypes = st.session_state.shiptype_filter or []
-
-    # 프로젝트가 선택된 경우만 필터링, 아니면 모든 선종
-    if current_projects:
-        available_shiptypes = set(df[df['프로젝트'].isin(current_projects)]['선종'].dropna().unique())
-    else:
-        available_shiptypes = set(all_shiptype)
-
-    # 현재 선택된 선종은 항상 옵션에 포함 (선택이 해제되지 않도록)
-    shiptype_options = sorted(available_shiptypes | set(current_shiptypes))
-
-    # multiselect without key - 반환값을 직접 session state에 저장
+with col_right:
     selected_shiptype = st.multiselect(
         "선종",
-        options=shiptype_options,
-        default=current_shiptypes
+        options=available_shiptypes,
+        default=cur_shiptypes,
+        key=KEY_SHIPTYPE
     )
-    # 명시적으로 session state 업데이트
-    st.session_state.shiptype_filter = selected_shiptype
 
-# Col1/col2 블록 외부에서 사용할 변수들
-projects_filter = st.session_state.projects_filter or []
-shiptype_filter = st.session_state.shiptype_filter or []
+projects_filter = selected_projects
+shiptype_filter = selected_shiptype
 
 # 프로젝트 정보 표시 (필터 바로 하부)
 if projects_filter:
@@ -327,37 +377,31 @@ if projects_filter:
         if info_text:
             st.sidebar.markdown(f"<div class='project-info'>{proj} {info_text}</div>", unsafe_allow_html=True)
 
-# ─ 모블록번호 필터 (프로젝트 연동)
-st.sidebar.markdown("### 🔲 모블록번호")
-available_moblocks = sorted(df[df['프로젝트'].isin(projects_filter)]['모블록번호'].dropna().unique()) if projects_filter else []
+# ─ 모블록번호
+st.sidebar.markdown("### ■ 모블록번호")
 selected_moblocks = st.sidebar.multiselect(
     "모블록번호 선택",
     options=available_moblocks,
-    key='moblock_filter'
+    default=cur_moblocks,
+    key=KEY_MOBLOCK
 )
 
-# ─ 블록번호 필터 (모블록 연동)
-st.sidebar.markdown("### 🔳 블록번호")
-filter_condition_block = df['프로젝트'].isin(projects_filter) if projects_filter else pd.Series([True] * len(df))
-if selected_moblocks:
-    filter_condition_block = filter_condition_block & df['모블록번호'].isin(selected_moblocks)
-available_blocks = sorted(df[filter_condition_block]['블록번호'].dropna().unique())
+# ─ 블록번호
+st.sidebar.markdown("### ■ 블록번호")
 selected_blocks = st.sidebar.multiselect(
     "블록번호 선택",
     options=available_blocks,
-    key='block_filter'
+    default=cur_blocks,
+    key=KEY_BLOCK
 )
 
-# ─ Stage 필터 (블록 연동)
-st.sidebar.markdown("### 📊 Stage")
-filter_condition_stage = df['프로젝트'].isin(projects_filter) if projects_filter else pd.Series([True] * len(df))
-if selected_blocks:
-    filter_condition_stage = filter_condition_stage & df['블록번호'].isin(selected_blocks)
-available_stages = sorted(df[filter_condition_stage]['stage'].unique())
+# ─ Stage
+st.sidebar.markdown("### ■ Stage")
 selected_stages = st.sidebar.multiselect(
     "Stage 선택",
     options=available_stages,
-    key='stages_filter'
+    default=cur_stages,
+    key=KEY_STAGE
 )
 
 # 필터 초기화 버튼 (on_click 콜백 사용)
@@ -393,406 +437,473 @@ if selected_blocks:
 
 # 필터 결과 요약
 st.sidebar.markdown("---")
-st.sidebar.metric("필터된 행 수", len(filtered_df))
-st.sidebar.metric("프로젝트 수", filtered_df['프로젝트'].nunique())
-st.sidebar.metric("선종 수", filtered_df['선종'].nunique())
+st.sidebar.markdown("### ■ 필터된 항목")
+summary_rows = [
+    ('필터된 행수', len(filtered_df)),
+    ('프로젝트수', filtered_df['프로젝트'].nunique()),
+    ('블록수', filtered_df['블록번호'].nunique()),
+    ('선종수', filtered_df['선종'].nunique()),
+]
+summary_html = "<table style='width:100%; font-size:9pt; color:#808080; border-collapse:collapse;'>"
+for label, value in summary_rows:
+    summary_html += f"<tr><td style='padding:1px 0;'>{label}</td><td style='padding:1px 0; text-align:right;'>{value:,}</td></tr>"
+summary_html += "</table>"
+st.sidebar.markdown(summary_html, unsafe_allow_html=True)
 
-# ─ DEBUG: 필터 값 확인 (사이드바 제일 하단)
+# ─ 배포 정보 (사이드바 제일 하단)
 st.sidebar.markdown("---")
-with st.sidebar.expander("🔧 디버그 정보"):
-    st.write(f"projects_filter: {projects_filter}")
-    st.write(f"shiptype_filter: {shiptype_filter}")
-    st.write(f"session projects_filter: {st.session_state.projects_filter}")
-    st.write(f"session shiptype_filter: {st.session_state.shiptype_filter}")
+st.sidebar.markdown(
+    "<div style='font-size:9pt; color:#808080;'>"
+    "배포날짜 : 2026-07-19<br>"
+    "문의사항 : 기획운영그룹장에게 문의바랍니다."
+    "</div>",
+    unsafe_allow_html=True
+)
 
 # ============================================================================
 # 5. 상단 KPI 지표
 # ============================================================================
-st.markdown("## 📊 주요 지표")
+st.markdown("## ■ 주요 지표")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+# ─ 원단위 계산 헬퍼 (공수 ÷ 용접장_total)
+def calc_wondanwi(numerator_sum, denom_sum):
+    """원단위 = 분자합 ÷ 용접장합. 용접장합이 0이면 0으로 처리 (0으로 나눌 수 없음)"""
+    if denom_sum == 0:
+        return 0.0
+    return round(numerator_sum / denom_sum, 4)
+
+total_qty = filtered_df['total_계량'].sum()
+total_std = filtered_df['total_기준'].sum()
+total_exec = filtered_df['total_실행'].sum()
+weld_len_sum = filtered_df['용접장_total'].sum()
+qty_wondanwi = calc_wondanwi(total_qty, weld_len_sum)
+std_wondanwi = calc_wondanwi(total_std, weld_len_sum)
+exec_wondanwi = calc_wondanwi(total_exec, weld_len_sum)
+
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
-    total_qty = filtered_df['total_계량'].sum()
-    st.metric("계량 총합", f"{total_qty:,.0f}")
-
+    st.metric("계량공수합", f"{total_qty:,.0f}")
 with col2:
-    total_std = filtered_df['total_기준'].sum()
-    st.metric("기준 총합", f"{total_std:,.0f}")
-
+    st.metric("기준공수합", f"{total_std:,.0f}")
 with col3:
-    total_exec = filtered_df['total_실행'].sum()
-    st.metric("실행공수 총합", f"{total_exec:,.0f}")
-
+    st.metric("실행공수합", f"{total_exec:,.0f}")
 with col4:
-    # 기준 대비 실행공수 비율
-    if total_std > 0:
-        ratio = (total_exec / total_std - 1) * 100
-        st.metric("기준 대비 증가율", f"{ratio:.1f}%")
-    else:
-        st.metric("기준 대비 증가율", "N/A")
-
+    st.metric("계량원단위", f"{qty_wondanwi:.4f}")
 with col5:
-    # 평균 R99율
-    avg_r99 = filtered_df['R99율'].mean() * 100
-    st.metric("평균 R99율", f"{avg_r99:.1f}%")
+    st.metric("기준원단위", f"{std_wondanwi:.4f}")
+with col6:
+    st.metric("실행원단위", f"{exec_wondanwi:.4f}")
 
 # ============================================================================
-# 6. 탭별 분석
+# 6. 탭별 분석 & 프로젝트 비교
 # ============================================================================
 
 # 필터 모드 선택 (기본 vs 비교)
 tab_mode = st.radio(
     "분석 모드 선택",
-    options=["📊 기본 필터", "🔄 프로젝트 비교"],
+    options=["기본 필터", "프로젝트 비교"],
     horizontal=True
 )
 
-if tab_mode == "📊 기본 필터":
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 프로젝트별", "🚢 선종별", "📍 Stage별", "📋 상세 데이터"])
-else:
-    st.markdown("## 🔄 프로젝트 비교 분석")
-
 # ─────────────────────────────────────────────────────────────────────────
-# TAB 1: 프로젝트별 분석
+# 기본 필터 모드: 4개 탭 분석
 # ─────────────────────────────────────────────────────────────────────────
-with tab1:
-    st.subheader("프로젝트별 공수 비교")
+if tab_mode == "기본 필터":
+    tab1, tab2, tab3, tab4 = st.tabs(["■ 프로젝트별", "■ 선종별", "■ STAGE별", "■ 상세 데이터"])
 
-    # 필터 선택 내용 표시
-    filter_info = []
-    if projects_filter:
-        filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
-    if shiptype_filter:
-        filter_info.append(f"선종: {', '.join(shiptype_filter)}")
-    if selected_stages:
-        filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
-    if selected_moblocks:
-        filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
-    if selected_blocks:
-        filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
+    # TAB 1: 프로젝트별 원단위 비교
+    with tab1:
+        st.subheader("프로젝트별 원단위 비교")
 
-    if filter_info:
-        st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
+        # 필터 선택 내용 표시
+        filter_info = []
+        if projects_filter:
+            filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
+        if shiptype_filter:
+            filter_info.append(f"선종: {', '.join(shiptype_filter)}")
+        if selected_stages:
+            filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
+        if selected_moblocks:
+            filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
+        if selected_blocks:
+            filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
 
-    # 프로젝트별 집계
-    project_summary = filtered_df.groupby('프로젝트').agg({
-        'total_계량': 'sum',
-        'total_기준': 'sum',
-        'total_실행': 'sum'
-    }).reset_index()
+        if filter_info:
+            st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
 
-    project_summary = project_summary.sort_values('total_실행', ascending=False)
+        # 프로젝트별 집계 (원단위 = 프로젝트별 SUM(값) ÷ SUM(용접장_total))
+        project_summary = filtered_df.groupby('프로젝트').agg(
+            용접장합=('용접장_total', 'sum'),
+            total_계량=('total_계량', 'sum'),
+            total_기준=('total_기준', 'sum'),
+            total_실행=('total_실행', 'sum'),
+        ).reset_index()
 
-    # 테이블 데이터 포맷팅 (천단위 구분기호 + 정수)
-    project_summary_display = project_summary.copy()
-    project_summary_display['계량'] = project_summary_display['total_계량'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    project_summary_display['기준'] = project_summary_display['total_기준'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    project_summary_display['실행공수'] = project_summary_display['total_실행'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    project_summary_display = project_summary_display[['프로젝트', '계량', '기준', '실행공수']]
+        project_summary['계량원단위'] = project_summary.apply(lambda r: calc_wondanwi(r['total_계량'], r['용접장합']), axis=1)
+        project_summary['기준원단위'] = project_summary.apply(lambda r: calc_wondanwi(r['total_기준'], r['용접장합']), axis=1)
+        project_summary['실행원단위'] = project_summary.apply(lambda r: calc_wondanwi(r['total_실행'], r['용접장합']), axis=1)
 
-    col1, col2 = st.columns([2, 1])
+        project_summary = project_summary.sort_values('실행원단위', ascending=False)
 
-    with col1:
-        # 그룹 바 차트
-        fig = go.Figure(data=[
-            go.Bar(name='계량', x=project_summary['프로젝트'], y=project_summary['total_계량']),
-            go.Bar(name='기준', x=project_summary['프로젝트'], y=project_summary['total_기준']),
-            go.Bar(name='실행공수', x=project_summary['프로젝트'], y=project_summary['total_실행'])
-        ])
+        # 테이블 데이터 포맷팅: 기준/실행원단위는 계량원단위 대비 비율(%)도 함께 표기
+        def _ratio_pct(value, base):
+            if base == 0:
+                return "N/A"
+            return f"{value:.4f} ({value / base * 100:.1f}%)"
+
+        project_summary_display = project_summary.copy()
+        project_summary_display['기준원단위(계량비 %)'] = project_summary_display.apply(
+            lambda r: _ratio_pct(r['기준원단위'], r['계량원단위']), axis=1
+        )
+        project_summary_display['실행원단위(계량비 %)'] = project_summary_display.apply(
+            lambda r: _ratio_pct(r['실행원단위'], r['계량원단위']), axis=1
+        )
+        project_summary_display['계량원단위'] = project_summary_display['계량원단위'].apply(lambda x: f"{x:.4f}")
+        project_summary_display = project_summary_display[
+            ['프로젝트', '계량원단위', '기준원단위(계량비 %)', '실행원단위(계량비 %)']
+        ]
+
+        col1, col2 = st.columns([3, 2])
+
+        with col1:
+            # 그룹 바 차트
+            fig = go.Figure(data=[
+                go.Bar(name='계량원단위', x=project_summary['프로젝트'], y=project_summary['계량원단위'],
+                       hovertemplate='계량원단위: %{y:.3f}<extra></extra>'),
+                go.Bar(name='기준원단위', x=project_summary['프로젝트'], y=project_summary['기준원단위'],
+                       hovertemplate='기준원단위: %{y:.3f}<extra></extra>'),
+                go.Bar(name='실행원단위', x=project_summary['프로젝트'], y=project_summary['실행원단위'],
+                       hovertemplate='실행원단위: %{y:.3f}<extra></extra>')
+            ])
+            fig.update_layout(
+                barmode='group',
+                xaxis_title="프로젝트",
+                yaxis_title="원단위",
+                height=400,
+                hovermode='x unified',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.dataframe(
+                project_summary_display,
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # TAB 2: 선종별 분석 (사이드바 필터 무시, 전체 데이터베이스 기준)
+    with tab2:
+        st.subheader("선종별 호선 실행공수·원단위 비교")
+        st.markdown(
+            "<div style='font-size:8pt; color:#888;'>사이드바 필터와 무관하게 전체 데이터 기준으로 표시됩니다.</div>",
+            unsafe_allow_html=True
+        )
+
+        # 호선(프로젝트)별 실행공수·원단위 집계 (전체 df 기준)
+        project_level = df.groupby(['선종', '프로젝트']).agg(
+            용접장합=('용접장_total', 'sum'),
+            계량합=('total_계량', 'sum'),
+            기준합=('total_기준', 'sum'),
+            실행합=('total_실행', 'sum'),
+        ).reset_index()
+        project_level['계량원단위'] = project_level.apply(lambda r: calc_wondanwi(r['계량합'], r['용접장합']), axis=1)
+        project_level['기준원단위'] = project_level.apply(lambda r: calc_wondanwi(r['기준합'], r['용접장합']), axis=1)
+        project_level['실행원단위'] = project_level.apply(lambda r: calc_wondanwi(r['실행합'], r['용접장합']), axis=1)
+
+        col_left, col_right = st.columns([3, 2])
+
+        # ─ 좌측: 선종별 콤보차트 (호선별 실행공수 막대 + 실행원단위 꺾은선), 세로 순차 배치
+        with col_left:
+            all_shiptypes_sorted = sorted(project_level['선종'].dropna().unique())
+            for stype in all_shiptypes_sorted:
+                stype_data = project_level[project_level['선종'] == stype].sort_values('프로젝트')
+
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=stype_data['프로젝트'], y=stype_data['실행합'],
+                    name='실행공수', yaxis='y1',
+                    marker_color='#1f77b4',
+                    customdata=[f"{v/1000:.1f}K" for v in stype_data['실행합']],
+                    hovertemplate='실행공수: %{customdata}<extra></extra>'
+                ))
+                fig.add_trace(go.Scatter(
+                    x=stype_data['프로젝트'], y=stype_data['실행원단위'],
+                    name='실행원단위', yaxis='y2',
+                    hovertemplate='실행원단위: %{y:.3f}<extra></extra>',
+                    mode='lines+markers', line=dict(color='#d62728', width=3)
+                ))
+                fig.update_layout(
+                    title=f"{stype} 호선별 실행공수·실행원단위",
+                    xaxis_title="호선(프로젝트)",
+                    yaxis=dict(title="실행공수"),
+                    yaxis2=dict(title="실행원단위", overlaying='y', side='right'),
+                    height=320,
+                    hovermode='x unified',
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ─ 우측: 선종별 호선당 평균 요약 테이블
+        with col_right:
+            # 공수(계량/기준/실행)는 호선당 평균 = 선종 총합 ÷ 호선수
+            shiptype_summary = project_level.groupby('선종').agg(
+                호선수=('프로젝트', 'nunique'),
+                계량공수평균=('계량합', 'mean'),
+                기준공수평균=('기준합', 'mean'),
+                실행공수평균=('실행합', 'mean'),
+            ).reset_index()
+
+            # 원단위는 개별(프로젝트/블록 등) 원단위를 절대 평균 내지 않고,
+            # 선종 전체 데이터의 SUM(값) ÷ SUM(용접장_total)로 한 번에 계산한다.
+            # (실행공수는 선종·stage별 R99 factor가 이미 행 단위로 반영되어 있으므로
+            #  그대로 합산하면 되고, 비율 자체를 평균내면 안 됨)
+            shiptype_raw_agg = project_level.groupby('선종').agg(
+                용접장합=('용접장합', 'sum'),
+                계량합=('계량합', 'sum'),
+                기준합=('기준합', 'sum'),
+                실행합=('실행합', 'sum'),
+            ).reset_index()
+            shiptype_raw_agg['계량원단위평균'] = shiptype_raw_agg.apply(lambda r: calc_wondanwi(r['계량합'], r['용접장합']), axis=1)
+            shiptype_raw_agg['기준원단위평균'] = shiptype_raw_agg.apply(lambda r: calc_wondanwi(r['기준합'], r['용접장합']), axis=1)
+            shiptype_raw_agg['실행원단위평균'] = shiptype_raw_agg.apply(lambda r: calc_wondanwi(r['실행합'], r['용접장합']), axis=1)
+
+            shiptype_summary = shiptype_summary.merge(
+                shiptype_raw_agg[['선종', '계량원단위평균', '기준원단위평균', '실행원단위평균']],
+                on='선종'
+            )
+
+            display = shiptype_summary.copy()
+            display['계량공수평균'] = display['계량공수평균'].round(0).astype(int).apply(lambda x: f"{x:,}")
+            display['기준공수평균'] = display['기준공수평균'].round(0).astype(int).apply(lambda x: f"{x:,}")
+            display['실행공수평균'] = display['실행공수평균'].round(0).astype(int).apply(lambda x: f"{x:,}")
+            display['계량원단위평균'] = display['계량원단위평균'].apply(lambda x: f"{x:.4f}")
+            display['기준원단위평균'] = display['기준원단위평균'].apply(lambda x: f"{x:.4f}")
+            display['실행원단위평균'] = display['실행원단위평균'].apply(lambda x: f"{x:.4f}")
+            # 전치 후 각 열(선종)의 dtype이 일관되도록 호선수도 문자열로 변환
+            # (혼합 dtype이면 Arrow 직렬화 시 자동 형변환을 시도하다 실패함)
+            display['호선수'] = display['호선수'].astype(str)
+
+            # 선종을 열(가로)로, 지표를 행으로 전치
+            display_t = display.set_index('선종').T
+            display_t.index.name = '항목'
+            display_t = display_t.reset_index()
+
+            st.markdown("<div style='font-size:9pt; color:#666;'>선종별 호선당(프로젝트당) 평균값</div>", unsafe_allow_html=True)
+            st.dataframe(display_t, use_container_width=True, hide_index=True)
+
+    # TAB 3: Stage별 분석
+    with tab3:
+        st.subheader("Stage별 원단위 추이 (공정 단계별)")
+
+        # 필터 선택 내용 표시
+        filter_info = []
+        if projects_filter:
+            filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
+        if shiptype_filter:
+            filter_info.append(f"선종: {', '.join(shiptype_filter)}")
+        if selected_stages:
+            filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
+        if selected_moblocks:
+            filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
+        if selected_blocks:
+            filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
+
+        if filter_info:
+            st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
+
+        # Stage별 집계 (원단위 = SUM(값) ÷ SUM(용접장_total))
+        stage_summary = filtered_df.groupby('stage').agg(
+            용접장합=('용접장_total', 'sum'),
+            total_계량=('total_계량', 'sum'),
+            total_기준=('total_기준', 'sum'),
+            total_실행=('total_실행', 'sum'),
+        ).reset_index()
+        stage_summary['계량원단위'] = stage_summary.apply(lambda r: calc_wondanwi(r['total_계량'], r['용접장합']), axis=1)
+        stage_summary['기준원단위'] = stage_summary.apply(lambda r: calc_wondanwi(r['total_기준'], r['용접장합']), axis=1)
+        stage_summary['실행원단위'] = stage_summary.apply(lambda r: calc_wondanwi(r['total_실행'], r['용접장합']), axis=1)
+
+        stage_summary = stage_summary.sort_values('stage')
+
+        # 테이블 데이터 포맷팅: 기준원단위/실행원단위는 계량원단위 대비 비율(%)을 함께 표기
+        stage_summary_display = stage_summary.copy()
+
+        def _ratio_pct(value, base):
+            if base == 0:
+                return "N/A"
+            return f"{value:.4f} ({value / base * 100:.1f}%)"
+
+        stage_summary_display['기준원단위(계량비 %)'] = stage_summary_display.apply(
+            lambda r: _ratio_pct(r['기준원단위'], r['계량원단위']), axis=1
+        )
+        stage_summary_display['실행원단위(계량비 %)'] = stage_summary_display.apply(
+            lambda r: _ratio_pct(r['실행원단위'], r['계량원단위']), axis=1
+        )
+        stage_summary_display['계량원단위'] = stage_summary_display['계량원단위'].apply(lambda x: f"{x:.4f}")
+        stage_summary_display = stage_summary_display[
+            ['stage', '계량원단위', '기준원단위(계량비 %)', '실행원단위(계량비 %)']
+        ]
+        stage_summary_display = stage_summary_display.rename(columns={'stage': 'Stage'})
+
+        # 라인 차트 (x축은 stage에 실제 존재하는 값만 카테고리로 표시)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=stage_summary['stage'].astype(str), y=stage_summary['계량원단위'],
+            mode='lines+markers', name='계량원단위', line=dict(dash='dash'),
+            hovertemplate='계량원단위: %{y:.3f}<extra></extra>'
+        ))
+        fig.add_trace(go.Scatter(
+            x=stage_summary['stage'].astype(str), y=stage_summary['기준원단위'],
+            mode='lines+markers', name='기준원단위',
+            hovertemplate='기준원단위: %{y:.3f}<extra></extra>'
+        ))
+        fig.add_trace(go.Scatter(
+            x=stage_summary['stage'].astype(str), y=stage_summary['실행원단위'],
+            mode='lines+markers', name='실행원단위', line=dict(width=3),
+            hovertemplate='실행원단위: %{y:.3f}<extra></extra>'
+        ))
+
         fig.update_layout(
-            barmode='group',
-            title="프로젝트별 공수 분포",
-            xaxis_title="프로젝트",
-            yaxis_title="공수",
+            title="Stage별 원단위 추이",
+            xaxis_title="Stage",
+            xaxis_type='category',
+            yaxis_title="원단위",
             height=400,
             hovermode='x unified'
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    with col2:
         st.dataframe(
-            project_summary_display,
+            stage_summary_display,
             use_container_width=True,
             hide_index=True
         )
 
-# ─────────────────────────────────────────────────────────────────────────
-# TAB 2: 선종별 분석
-# ─────────────────────────────────────────────────────────────────────────
-with tab2:
-    st.subheader("선종별 공수 비교")
+    # TAB 4: 상세 데이터
+    with tab4:
+        st.subheader("필터된 상세 데이터")
 
-    # 필터 선택 내용 표시
-    filter_info = []
-    if projects_filter:
-        filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
-    if shiptype_filter:
-        filter_info.append(f"선종: {', '.join(shiptype_filter)}")
-    if selected_stages:
-        filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
-    if selected_moblocks:
-        filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
-    if selected_blocks:
-        filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
+        # 필터 선택 내용 표시
+        filter_info = []
+        if projects_filter:
+            filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
+        if shiptype_filter:
+            filter_info.append(f"선종: {', '.join(shiptype_filter)}")
+        if selected_stages:
+            filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
+        if selected_moblocks:
+            filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
+        if selected_blocks:
+            filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
 
-    if filter_info:
-        st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
+        if filter_info:
+            st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
 
-    # 선종별 집계
-    shiptype_summary = filtered_df.groupby('선종').agg({
-        'total_계량': 'sum',
-        'total_기준': 'sum',
-        'total_실행': 'sum',
-        'R99율': 'mean'  # 평균 R99율
-    }).reset_index()
+        # 표시할 컬럼 선택
+        display_cols = [
+            '프로젝트', '모블록번호', '블록번호', 'stage', '선종',
+            '모듈',
+            'total_계량', 'total_기준', 'total_실행',
+            'R99율'
+        ]
 
-    shiptype_summary['R99율_%'] = (shiptype_summary['R99율'] * 100).round(1)
-    shiptype_summary = shiptype_summary.sort_values('total_실행', ascending=False)
+        # 상세 데이터 포맷팅
+        detail_display = filtered_df[display_cols].copy()
+        detail_display['계량'] = detail_display['total_계량'].round(0).astype(int).apply(lambda x: f"{x:,}")
+        detail_display['기준'] = detail_display['total_기준'].round(0).astype(int).apply(lambda x: f"{x:,}")
+        detail_display['실행공수'] = detail_display['total_실행'].round(0).astype(int).apply(lambda x: f"{x:,}")
+        detail_display['R99율(%)'] = (detail_display['R99율'] * 100).round(1)
+        detail_display = detail_display[['프로젝트', '모블록번호', '블록번호', 'stage', '선종', '모듈', '계량', '기준', '실행공수', 'R99율(%)']]
+        detail_display = detail_display.rename(columns={'stage': 'Stage'})
 
-    # 테이블 데이터 포맷팅 (천단위 구분기호 + 정수)
-    shiptype_summary_display = shiptype_summary.copy()
-    shiptype_summary_display['계량'] = shiptype_summary_display['total_계량'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    shiptype_summary_display['기준'] = shiptype_summary_display['total_기준'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    shiptype_summary_display['실행공수'] = shiptype_summary_display['total_실행'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    shiptype_summary_display = shiptype_summary_display[['선종', '계량', '기준', '실행공수', 'R99율_%']]
-    shiptype_summary_display = shiptype_summary_display.rename(columns={'R99율_%': 'R99율(%)'})
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        # Pie 차트
-        fig = go.Figure(data=[go.Pie(
-            labels=shiptype_summary['선종'],
-            values=shiptype_summary['total_실행'],
-            hole=0.3
-        )])
-        fig.update_layout(
-            title="선종별 실행공수 비율",
-            height=400
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
+        # 상세 데이터 테이블
         st.dataframe(
-            shiptype_summary_display,
+            detail_display,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            height=600
         )
 
-# ─────────────────────────────────────────────────────────────────────────
-# TAB 3: Stage별 분석
-# ─────────────────────────────────────────────────────────────────────────
-with tab3:
-    st.subheader("Stage별 공수 분포 (공정 단계별)")
+        # 다운로드 버튼
+        csv = filtered_df[display_cols].to_csv(index=False, encoding='utf-8-sig')
+        st.download_button(
+            label="💾 필터된 데이터 CSV 다운로드",
+            data=csv,
+            file_name="hull_dashboard_export.csv",
+            mime="text/csv"
+        )
 
-    # 필터 선택 내용 표시
-    filter_info = []
-    if projects_filter:
-        filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
-    if shiptype_filter:
-        filter_info.append(f"선종: {', '.join(shiptype_filter)}")
-    if selected_stages:
-        filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
-    if selected_moblocks:
-        filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
-    if selected_blocks:
-        filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
+    # ════════════════════════════════════════════════════════════════════════
+    # 추가 분석: 공정별 공수 비율
+    # ════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("## ■ 공정별 공수 분석")
 
-    if filter_info:
-        st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
+    process_names = ['심출', '취부', '용접', '사상', '기타']
+    process_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
-    # Stage별 집계
-    stage_summary = filtered_df.groupby('stage').agg({
-        'total_계량': 'sum',
-        'total_기준': 'sum',
-        'total_실행': 'sum'
-    }).reset_index()
+    col1, col2, col3 = st.columns(3)
 
-    stage_summary = stage_summary.sort_values('stage')
-
-    # 테이블 데이터 포맷팅 (천단위 구분기호 + 정수)
-    stage_summary_display = stage_summary.copy()
-    stage_summary_display['계량'] = stage_summary_display['total_계량'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    stage_summary_display['기준'] = stage_summary_display['total_기준'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    stage_summary_display['실행공수'] = stage_summary_display['total_실행'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    stage_summary_display = stage_summary_display[['stage', '계량', '기준', '실행공수']]
-    stage_summary_display = stage_summary_display.rename(columns={'stage': 'Stage'})
-
-    # 라인 차트
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=stage_summary['stage'], y=stage_summary['total_계량'],
-        mode='lines+markers', name='계량', line=dict(dash='dash')
-    ))
-    fig.add_trace(go.Scatter(
-        x=stage_summary['stage'], y=stage_summary['total_기준'],
-        mode='lines+markers', name='기준'
-    ))
-    fig.add_trace(go.Scatter(
-        x=stage_summary['stage'], y=stage_summary['total_실행'],
-        mode='lines+markers', name='실행공수', line=dict(width=3)
-    ))
-
-    fig.update_layout(
-        title="Stage별 공수 추이",
-        xaxis_title="Stage",
-        yaxis_title="공수",
-        height=400,
-        hovermode='x unified'
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.dataframe(
-        stage_summary_display,
-        use_container_width=True,
-        hide_index=True
-    )
-
-# ─────────────────────────────────────────────────────────────────────────
-# TAB 4: 상세 데이터
-# ─────────────────────────────────────────────────────────────────────────
-with tab4:
-    st.subheader("필터된 상세 데이터")
-
-    # 필터 선택 내용 표시
-    filter_info = []
-    if projects_filter:
-        filter_info.append(f"프로젝트: {', '.join(projects_filter)}")
-    if shiptype_filter:
-        filter_info.append(f"선종: {', '.join(shiptype_filter)}")
-    if selected_stages:
-        filter_info.append(f"Stage: {', '.join(map(str, selected_stages))}")
-    if selected_moblocks:
-        filter_info.append(f"모블록: {', '.join(map(str, selected_moblocks))}")
-    if selected_blocks:
-        filter_info.append(f"블록: {', '.join(map(str, selected_blocks))}")
-
-    if filter_info:
-        st.markdown(f"<div style='font-size:8pt; color:#888;'>필터: {' | '.join(filter_info)}</div>", unsafe_allow_html=True)
-
-    # 표시할 컬럼 선택
-    display_cols = [
-        '프로젝트', '모블록번호', '블록번호', 'stage', '선종',
-        '모듈',
-        'total_계량', 'total_기준', 'total_실행',
-        'R99율'
+    process_cols = [
+        (col1, '계량', '공정별 계량 비율', '계량공수(JMH)'),
+        (col2, '기준', '공정별 기준공수 비율', '기준공수(JMH)'),
+        (col3, '실행', '공정별 실행공수 비율', '실행공수(JMH)'),
     ]
 
-    # 상세 데이터 포맷팅
-    detail_display = filtered_df[display_cols].copy()
-    detail_display['계량'] = detail_display['total_계량'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    detail_display['기준'] = detail_display['total_기준'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    detail_display['실행공수'] = detail_display['total_실행'].round(0).astype(int).apply(lambda x: f"{x:,}")
-    detail_display['R99율(%)'] = (detail_display['R99율'] * 100).round(1)
-    detail_display = detail_display[['프로젝트', '모블록번호', '블록번호', 'stage', '선종', '모듈', '계량', '기준', '실행공수', 'R99율(%)']]
-    detail_display = detail_display.rename(columns={'stage': 'Stage'})
+    for col, kind, title, center_label in process_cols:
+        with col:
+            st.subheader(title)
+            values = [filtered_df[f'{p}_{kind}'].sum() for p in process_names]
+            total_value = sum(values)
 
-    # 상세 데이터 테이블
-    st.dataframe(
-        detail_display,
-        use_container_width=True,
-        hide_index=True,
-        height=600
-    )
+            fig = go.Figure(data=[go.Pie(
+                labels=process_names,
+                values=values,
+                hole=0.6,
+                marker=dict(colors=process_colors),
+                texttemplate='%{percent:.1%}',
+                hovertemplate='%{label}: %{value:,.0f}<br>%{percent:.1%}<extra></extra>'
+            )])
+            fig.update_layout(
+                height=380,
+                margin=dict(t=20, b=60, l=10, r=10),
+                showlegend=True,
+                legend=dict(orientation='h', yanchor='top', y=-0.05, xanchor='center', x=0.5),
+                annotations=[dict(
+                    text=f"<span style='font-size:11px'>{center_label}</span><br><span style='font-size:18px'>{total_value:,.0f}</span>",
+                    x=0.5, y=0.5,
+                    font=dict(size=18),
+                    showarrow=False
+                )]
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-    # 다운로드 버튼
-    csv = filtered_df[display_cols].to_csv(index=False, encoding='utf-8-sig')
-    st.download_button(
-        label="💾 필터된 데이터 CSV 다운로드",
-        data=csv,
-        file_name="hull_dashboard_export.csv",
-        mime="text/csv"
-    )
 
-# ============================================================================
-# 7. 추가 분석: 공정별 공수 분포
-# ============================================================================
-st.markdown("---")
-st.markdown("## 🔧 공정별 공수 분석")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("공정별 계량 분포")
-    
-    process_qty = pd.DataFrame({
-        '심출': [filtered_df['심출_계량'].sum()],
-        '취부': [filtered_df['취부_계량'].sum()],
-        '용접': [filtered_df['용접_계량'].sum()],
-        '사상': [filtered_df['사상_계량'].sum()],
-        '기타': [filtered_df['기타_계량'].sum()]
-    }).T.rename(columns={0: '계량'})
-    
-    fig = go.Figure(data=[go.Bar(
-        y=process_qty.index,
-        x=process_qty['계량'],
-        orientation='h',
-        marker=dict(color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'])
-    )])
-    fig.update_layout(
-        title="공정별 계량 합계",
-        xaxis_title="계량",
-        height=350,
-        showlegend=False
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.subheader("공정별 실행공수 분포")
-    
-    process_exec = pd.DataFrame({
-        '심출': [filtered_df['심출_실행'].sum()],
-        '취부': [filtered_df['취부_실행'].sum()],
-        '용접': [filtered_df['용접_실행'].sum()],
-        '사상': [filtered_df['사상_실행'].sum()],
-        '기타': [filtered_df['기타_실행'].sum()]
-    }).T.rename(columns={0: '실행공수'})
-    
-    fig = go.Figure(data=[go.Bar(
-        y=process_exec.index,
-        x=process_exec['실행공수'],
-        orientation='h',
-        marker=dict(color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'])
-    )])
-    fig.update_layout(
-        title="공정별 실행공수 합계",
-        xaxis_title="실행공수",
-        height=350,
-        showlegend=False
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# ============================================================================
-# 8. 데이터 정보
-# ============================================================================
-st.markdown("---")
-with st.expander("ℹ️ 데이터 정보 및 계산 방식"):
-    st.markdown("""
-    ### 테이블 구조
-    - **Hull_erec_baseMH**: 블록/모듈 단위 작업 실적 (4,402행)
-    - **Hull_info**: 호선(프로젝트) 마스터 정보 (10개 프로젝트)
-    - **R99_rate**: 선종/stage별 R99율 (실행공수 산출 factor)
-    
-    ### 계산 방식
-    - **기준공수**: 계량공수 × 선종별 factor (LNG 0.8, CONT 0.7, SHTL 0.85, LPG 0.85)
-    - **실행공수**: 기준공수 × (1 + R99율)
-      - R99율은 선종과 stage 조합별로 지정된 값
-      - 예: LNG stage 40 → R99율 0.221 → 기준공수 × 1.221
-    
-    ### 공정 분류
-    - 심출: 11%, 취부: 22%, 용접: 54%, 사상: 10%, 기타: 3%
-    
-    ### Stage 정의
-    - **30, 40**: 자블록(Sub-block) 단계
-    - **50, 60, 70**: 모블록(Module Block) 단계
-    """)
-
-# ============================================================================
-# 8. 프로젝트 비교 섹션 (MODE B)
-# ============================================================================
-if tab_mode == "🔄 프로젝트 비교":
+# ─────────────────────────────────────────────────────────────────────────
+# 프로젝트 비교 모드
+# ─────────────────────────────────────────────────────────────────────────
+else:
     st.markdown("---")
+
+    # ─ 프로젝트 비교 모드에 반응하는 사이드바 필터는 "선종"과 "모블록번호" 두 가지뿐
+    _sidebar_selection_parts = []
+    if shiptype_filter:
+        _sidebar_selection_parts.append(f"[{', '.join(shiptype_filter)}]")
+    if selected_moblocks:
+        _sidebar_selection_parts.append(f"[{', '.join(selected_moblocks)}]")
+
+    if _sidebar_selection_parts:
+        _sidebar_caption = ', '.join(_sidebar_selection_parts) + "를 선택했습니다"
+    else:
+        _sidebar_caption = "프로젝트 A, B를 선택하세요"
+    st.markdown(f"<div style='font-size:9pt; color:#666;'>{_sidebar_caption}</div>", unsafe_allow_html=True)
+
+    # 선종이 선택되어 있으면 프로젝트 A/B 옵션을 해당 선종 소속 프로젝트로 좁힘
+    if shiptype_filter:
+        compare_project_options = sorted(df[df['선종'].isin(shiptype_filter)]['프로젝트'].unique())
+    else:
+        compare_project_options = all_projects
 
     col1, col2 = st.columns(2)
 
@@ -800,7 +911,7 @@ if tab_mode == "🔄 프로젝트 비교":
         st.markdown("### 프로젝트 A")
         project_a = st.selectbox(
             "프로젝트 선택",
-            options=all_projects,
+            options=compare_project_options,
             key='compare_project_a'
         )
         if project_a:
@@ -811,7 +922,7 @@ if tab_mode == "🔄 프로젝트 비교":
         st.markdown("### 프로젝트 B")
         project_b = st.selectbox(
             "프로젝트 선택",
-            options=all_projects,
+            options=compare_project_options,
             key='compare_project_b'
         )
         if project_b:
@@ -820,59 +931,113 @@ if tab_mode == "🔄 프로젝트 비교":
 
     st.markdown("---")
 
-    # 공통 블록/Stage 찾기
+    # ─ 블록+Stage 단위 원단위 편차 분석
+    # 이 탭에 반응하는 사이드바 필터는 모블록번호뿐 (블록번호/Stage 필터는 미반영)
+    def get_project_wondanwi_table(project_name):
+        sub = df[df['프로젝트'] == project_name]
+        if selected_moblocks:
+            sub = sub[sub['모블록번호'].isin(selected_moblocks)]
+        if sub.empty:
+            return None
+
+        grp = sub.groupby(['블록번호', 'stage']).agg(
+            용접장합=('용접장_total', 'sum'),
+            계량합=('total_계량', 'sum'),
+            기준합=('total_기준', 'sum'),
+            실행합=('total_실행', 'sum'),
+        ).reset_index()
+        grp['계량원단위'] = grp.apply(lambda r: calc_wondanwi(r['계량합'], r['용접장합']), axis=1)
+        grp['기준원단위'] = grp.apply(lambda r: calc_wondanwi(r['기준합'], r['용접장합']), axis=1)
+        grp['실행원단위'] = grp.apply(lambda r: calc_wondanwi(r['실행합'], r['용접장합']), axis=1)
+        return grp.sort_values(['블록번호', 'stage']).reset_index(drop=True)
+
+    def render_project_wondanwi(project_name, label):
+        st.markdown(f"#### {label}: {project_name}")
+        grp = get_project_wondanwi_table(project_name)
+
+        if grp is None or grp.empty:
+            if selected_moblocks:
+                st.info(f"해당 모블록번호는 없습니다. ({', '.join(selected_moblocks)})")
+            else:
+                st.info("선택한 조건에 해당하는 데이터가 없습니다.")
+            return None
+
+        # 표시 항목: 블록번호/STAGE/용접장합/기준공수합/기준원단위/실행공수합/실행원단위
+        # 공수(용접장합/기준공수합/실행공수합)는 정수+1000단위 구분기호, 원단위는 소수점 3자리
+        display_df = grp.copy()
+        display_df['용접장합'] = display_df['용접장합'].round(0).astype(int).apply(lambda x: f"{x:,}")
+        display_df['기준공수합'] = display_df['기준합'].round(0).astype(int).apply(lambda x: f"{x:,}")
+        display_df['실행공수합'] = display_df['실행합'].round(0).astype(int).apply(lambda x: f"{x:,}")
+        display_df['기준원단위'] = display_df['기준원단위'].apply(lambda x: f"{x:.3f}")
+        display_df['실행원단위'] = display_df['실행원단위'].apply(lambda x: f"{x:.3f}")
+        display_df = display_df.rename(columns={'stage': 'STAGE'})
+        st.dataframe(
+            display_df[['블록번호', 'STAGE', '용접장합', '기준공수합', '기준원단위', '실행공수합', '실행원단위']],
+            use_container_width=True, hide_index=True
+        )
+
+        # 블록+Stage 조합이 2개 이상일 때만 편차 표시 (1개면 편차 개념이 성립하지 않음)
+        if len(grp) > 1:
+            dev_lines = []
+            for col_name, kr_label in [('기준원단위', '기준'), ('실행원단위', '실행')]:
+                max_row = grp.loc[grp[col_name].idxmax()]
+                min_row = grp.loc[grp[col_name].idxmin()]
+                dev = round(max_row[col_name] - min_row[col_name], 3)
+                dev_lines.append(
+                    f"{kr_label}원단위 편차(최대-최소): <b>{dev:.3f}</b> "
+                    f"(최대 {max_row['블록번호']}-S{max_row['stage']}: {max_row[col_name]:.3f}, "
+                    f"최소 {min_row['블록번호']}-S{min_row['stage']}: {min_row[col_name]:.3f})"
+                )
+            st.markdown(
+                "<div style='font-size:9pt; color:#808080; line-height:1.6;'>" +
+                "<br>".join(dev_lines) + "</div>",
+                unsafe_allow_html=True
+            )
+
+        return grp
+
     if project_a and project_b and project_a != project_b:
-        df_a = df[df['프로젝트'] == project_a]
-        df_b = df[df['프로젝트'] == project_b]
+        col_a, col_b = st.columns(2)
+        with col_a:
+            grp_a = render_project_wondanwi(project_a, "프로젝트 A")
+        with col_b:
+            grp_b = render_project_wondanwi(project_b, "프로젝트 B")
 
-        common_blocks = set(df_a['블록번호'].unique()) & set(df_b['블록번호'].unique())
-        common_stages = set(df_a['stage'].unique()) & set(df_b['stage'].unique())
+        # ─ 실행원단위 편차 상위 10개 (프로젝트 A+B 데이터 기준)
+        combined_parts = []
+        if grp_a is not None:
+            t = grp_a.copy()
+            t['프로젝트'] = project_a
+            combined_parts.append(t)
+        if grp_b is not None:
+            t = grp_b.copy()
+            t['프로젝트'] = project_b
+            combined_parts.append(t)
 
-        if common_blocks and common_stages:
-            st.success(f"✅ 공통 블록: {sorted(common_blocks)}")
-            st.success(f"✅ 공통 Stage: {sorted(common_stages)}")
+        if combined_parts:
+            combined = pd.concat(combined_parts, ignore_index=True)
+            if len(combined) > 1:
+                mean_exec = combined['실행원단위'].mean()
+                combined['평균과의차이'] = (combined['실행원단위'] - mean_exec).abs().round(4)
+                top10 = combined.sort_values('평균과의차이', ascending=False).head(10)
 
-            # 공통 블록과 Stage 모두 가진 데이터만 필터링
-            comparison_data = df[
-                ((df['프로젝트'] == project_a) | (df['프로젝트'] == project_b)) &
-                (df['블록번호'].isin(common_blocks)) &
-                (df['stage'].isin(common_stages))
-            ].copy()
-
-            # 블록별, Stage별로 비교 데이터 표시
-            for block in sorted(common_blocks):
-                block_data = comparison_data[comparison_data['블록번호'] == block]
-                st.markdown(f"### 📍 블록 {block}")
-
-                for stage in sorted(block_data['stage'].unique()):
-                    stage_data = block_data[block_data['stage'] == stage]
-                    st.markdown(f"**Stage {stage}**")
-
-                    # 프로젝트별 데이터 비교
-                    comparison_table = []
-                    for _, row in stage_data.iterrows():
-                        comparison_table.append({
-                            '프로젝트': row['프로젝트'],
-                            '계량': f"{row['total_계량']:,.0f}",
-                            '기준': f"{row['total_기준']:,.0f}",
-                            '실행공수': f"{row['total_실행']:,.0f}",
-                            '심출': f"{row['심출_계량']:.0f}/{row['심출_기준']:.0f}/{row['심출_실행']:.0f}",
-                            '취부': f"{row['취부_계량']:.0f}/{row['취부_기준']:.0f}/{row['취부_실행']:.0f}",
-                            '용접': f"{row['용접_계량']:.0f}/{row['용접_기준']:.0f}/{row['용접_실행']:.0f}",
-                            '사상': f"{row['사상_계량']:.0f}/{row['사상_기준']:.0f}/{row['사상_실행']:.0f}",
-                        })
-
-                    if comparison_table:
-                        comparison_df = pd.DataFrame(comparison_table)
-                        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
-
-                    st.markdown("---")
-        else:
-            st.warning("⚠️ 공통 블록/Stage가 없습니다.")
+                st.markdown("---")
+                st.markdown("### ■ 실행원단위 편차 상위 10개 (프로젝트 A+B 기준)")
+                st.dataframe(
+                    top10[['프로젝트', '블록번호', 'stage', '실행원단위', '평균과의차이']].rename(
+                        columns={'stage': 'Stage'}
+                    ),
+                    use_container_width=True, hide_index=True
+                )
     elif project_a == project_b:
         st.warning("⚠️ 다른 프로젝트를 선택해주세요.")
     else:
         st.info("ℹ️ 프로젝트 A, B를 모두 선택해주세요.")
 
+# ════════════════════════════════════════════════════════════════════════════
+# 푸터
+# ════════════════════════════════════════════════════════════════════════════
 st.markdown("---")
-st.markdown("**생성일**: 2024년 | **데이터**: 더미데이터 (seed=42)")
+# 생성일: 데이터베이스 연결 시 조회 시점의 날짜/시간을 표시 (현재는 앱 렌더링 시각)
+_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.markdown(f"**생성일**: {_generated_at} | **데이터**: ")
