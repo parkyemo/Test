@@ -316,6 +316,10 @@ with col2:
     # 명시적으로 session state 업데이트
     st.session_state.shiptype_filter = selected_shiptype
 
+# Col1/col2 블록 외부에서 사용할 변수들
+projects_filter = st.session_state.projects_filter or []
+shiptype_filter = st.session_state.shiptype_filter or []
+
 # 프로젝트 정보 표시 (필터 바로 하부)
 if projects_filter:
     for proj in projects_filter:
